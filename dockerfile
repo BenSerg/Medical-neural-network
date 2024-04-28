@@ -11,11 +11,6 @@ RUN if [ "$KEY" = "cuda" ]; then \
 elif [ "$KEY" = "rocm" ]; then \
     echo "Running command for Sergey"; \
     pip3 install torch==$TORCH_VERSION torchvision==$TORCHVISION_VERSION torchaudio==$TORCHAUDIO_VERSION --index-url https://download.pytorch.org/whl/rocm5.7; \
-    sudo apt update; \
-    wget https://repo.radeon.com/amdgpu-install/5.7/ubuntu/focal/amdgpu-install_5.7.50700-1_all.deb; \
-    sudo apt install ./amdgpu-install_5.7.50700-1_all.deb; \
-    sudo amdgpu-install --usecase=rocm; \
-    reboot; \
 elif [ "$KEY" = "cpu" ]; then \
     echo "Running command for Mathew"; \
     pip3 install torch==$TORCH_VERSION torchvision==$TORCHVISION_VERSION torchaudio==$TORCHAUDIO_VERSION --index-url https://download.pytorch.org/whl/cpu; \
