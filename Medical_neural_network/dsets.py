@@ -186,10 +186,24 @@ class LunaDataset(Dataset):
         ))
 
     def __len__(self):
-        return len(self.candidateInfo_list)
+        if self.ratio_int:
+            return 200000
+        else:
+            return len(self.candidateInfo_list)
 
     def __getitem__(self, ndx):
-        candidateInfo_tup = self.candidateInfo_list[ndx]
+        if self.ratio_int:
+            pos_ndx = ndx // (self.ratio_int + 1)
+            if ndx % (self.ratio_int + 1):
+                neg_ndx = ndx - 1 - pos_ndx
+                neg_ndx %= len(self.negative_list)
+                candidateInfo_tup = self.negative_list[neg_ndx]
+            else:
+                pos_ndx %= len(self.pos_list)
+                candidateInfo_tup = self.pos_list[pos_ndx]
+        else:
+            candidateInfo_tup = self.candidateInfo_list[ndx]
+            
         width_irc = (32, 48, 48)
 
         candidate_a, center_irc = getCtRawCandidate(
@@ -206,5 +220,10 @@ class LunaDataset(Dataset):
             ],
             dtype=torch.long,
         )
+
+    def shuffleSamples(self):
+        if self.ratio_int:
+            random.shuffle(self.negative_list)
+            random.shuffle(self.pos_list)
 
         return candidate_t, pos_t, candidateInfo_tup.series_uid, torch.tensor(center_irc)
