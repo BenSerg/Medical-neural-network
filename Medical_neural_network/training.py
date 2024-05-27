@@ -71,6 +71,18 @@ class LunaTrainingApp:
         self.model = self.init_model()
         self.optimizer = self.init_optimizer()
 
+        self.augmentation_dict = {}
+        if self.cli_args.augmented or self.cli_args.augment_flip:
+            self.augmentation_dict['flip'] = True
+        if self.cli_args.augmented or self.cli_args.augment_offset:
+            self.augmentation_dict['offset'] = 0.1
+        if self.cli_args.augmented or self.cli_args.augment_scale:
+            self.augmentation_dict['scale'] = 0.2
+        if self.cli_args.augmented or self.cli_args.augment_rotate:
+            self.augmentation_dict['rotate'] = True
+        if self.cli_args.augmented or self.cli_args.augment_noise:
+            self.augmentation_dict['noise'] = 25.0
+
     def init_model(self):
         model = LunaModel()
         if self.use_cuda:
