@@ -148,6 +148,68 @@ def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
     return ct_chunk, center_irc
 
+def getCtAugmentedCandidate(
+    augmentation_dict,
+    series_uid, center_xyz, width_irc,
+    use_cache=True):
+        if use_cache:
+            ct_chunk, center_irc = \
+            getCtRawCandidate(series_uid, center_xyz, width_irc)
+        else:
+            ct = getCt(series_uid)
+            ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
+        ct_t = torch.tensor(ct_chunk).unsqueeze(0).unsqueeze(0).to(torch.float32)
+
+    transform_t = torch.eye(4)
+    # ... Изменения в transform_tensor отразятся здесь
+    # ... строка 195
+    affine_t = F.affine_grid(
+    transform_t[:3].unsqueeze(0).to(torch.float32),
+    ct_t.size(),
+    align_corners=False,
+    )
+
+    transform_t = torch.eye(4)
+    # ... Изменения в transform_tensor отразятся здесь
+    # ... строка 195
+    affine_t = F.affine_grid(
+        transform_t[:3].unsqueeze(0).to(torch.float32),
+        ct_t.size(),
+        align_corners=False,
+    )
+
+    for i in range(3):
+        if 'flip' in augmentation_dict:
+            if random.random() > 0.5:
+                transform_t[i,i] *= -1
+        if 'offset' in augmentation_dict:
+            offset_float = augmentation_dict['offset']
+            random_float = (random.random() * 2 - 1)
+            transform_t[i,3] = offset_float * random_float
+        if 'scale' in augmentation_dict:
+            scale_float = augmentation_dict['scale']
+            random_float = (random.random() * 2 - 1)
+            transform_t[i,i] *= 1.0 + scale_float * random_float
+
+    if 'rotate' in augmentation_dict:
+        angle_rad = random.random() * math.pi * 2
+        s = math.sin(angle_rad)
+        c = math.cos(angle_rad)
+ 
+rotation_t = torch.tensor([
+    [c, -s, 0, 0],
+    [s, c, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
+])
+
+transform_t @= rotation_t
+
+if 'noise' in augmentation_dict:
+    noise_t = torch.randn_like(augmented_chunk)
+    noise_t *= augmentation_dict['noise']
+    augmented_chunk += noise_t
+
 class LunaDataset(Dataset):
     def __init__(self,
                  val_stride=0,
