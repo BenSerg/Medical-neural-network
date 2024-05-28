@@ -4,6 +4,7 @@ import functools
 import glob
 import os
 import random
+import math
 
 from collections import namedtuple
 
@@ -30,6 +31,7 @@ CandidateInfoTuple = namedtuple(
 )
 
 data_path = os.getenv('PARTICIPANT_DATA_PATH')
+
 
 @functools.lru_cache(1)
 def getCandidateInfoList(requireOnDisk_bool=True):
@@ -82,6 +84,7 @@ def getCandidateInfoList(requireOnDisk_bool=True):
     candidateInfo_list.sort(reverse=True)
     return candidateInfo_list
 
+
 class Ct:
     def __init__(self, series_uid):
         mhd_path = glob.glob(
@@ -114,10 +117,11 @@ class Ct:
 
         slice_list = []
         for axis, center_val in enumerate(center_irc):
-            start_ndx = int(round(center_val - width_irc[axis]/2))
+            start_ndx = int(round(center_val - width_irc[axis] / 2))
             end_ndx = int(start_ndx + width_irc[axis])
 
-            assert center_val >= 0 and center_val < self.hu_a.shape[axis], repr([self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
+            assert center_val >= 0 and center_val < self.hu_a.shape[axis], repr(
+                [self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
 
             if start_ndx < 0:
                 # log.warning("Crop outside of CT array: {} {}, center:{} shape:{} width:{}".format(
@@ -142,11 +146,86 @@ class Ct:
 def getCt(series_uid):
     return Ct(series_uid)
 
+
 @raw_cache.memoize(typed=True)
 def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct = getCt(series_uid)
     ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
     return ct_chunk, center_irc
+
+    def getCtAugmentedCandidate(
+            augmentation_dict,
+            series_uid, center_xyz, width_irc,
+            use_cache=True):
+        if use_cache:
+            ct_chunk, center_irc = \
+                getCtRawCandidate(series_uid, center_xyz, width_irc)
+        else:
+            ct = getCt(series_uid)
+            ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
+
+        ct_t = torch.tensor(ct_chunk).unsqueeze(0).unsqueeze(0).to(torch.float32)
+
+        transform_t = torch.eye(4)
+        # ... Изменения в transform_tensor отразятся здесь
+        # ... строка 195
+
+        transform_t = torch.eye(4)
+        # ... Изменения в transform_tensor отразятся здесь
+        # ... строка 195
+        affine_t = F.affine_grid(
+            transform_t[:3].unsqueeze(0).to(torch.float32),
+            ct_t.size(),
+            align_corners=False,
+        )
+
+        for i in range(3):
+            if 'flip' in augmentation_dict:
+                if random.random() > 0.5:
+                    transform_t[i, i] *= -1
+            if 'offset' in augmentation_dict:
+                offset_float = augmentation_dict['offset']
+                random_float = (random.random() * 2 - 1)
+                transform_t[i, 3] = offset_float * random_float
+            if 'scale' in augmentation_dict:
+                scale_float = augmentation_dict['scale']
+                random_float = (random.random() * 2 - 1)
+                transform_t[i, i] *= 1.0 + scale_float * random_float
+
+        if 'rotate' in augmentation_dict:
+            angle_rad = random.random() * math.pi * 2
+            s = math.sin(angle_rad)
+            c = math.cos(angle_rad)
+
+            rotation_t = torch.tensor([
+                [c, -s, 0, 0],
+                [s, c, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1],
+            ])
+
+            transform_t @= rotation_t
+
+        affine_t = F.affine_grid(
+            transform_t[:3].unsqueeze(0).to(torch.float32),
+            ct_t.size(),
+            align_corners=False,
+        )
+
+        augmented_chunk = F.grid_sample(
+            ct_t,
+            affine_t,
+            padding_mode='border',
+            align_corners=False,
+        ).to('cpu')
+
+        if 'noise' in augmentation_dict:
+            noise_t = torch.randn_like(augmented_chunk)
+            noise_t *= augmentation_dict['noise']
+
+            augmented_chunk += noise_t
+
+        return augmented_chunk[0], center_irc
 
 class LunaDataset(Dataset):
     def __init__(self,
@@ -154,7 +233,7 @@ class LunaDataset(Dataset):
                  isValSet_bool=None,
                  series_uid=None,
                  sortby_str='random',
-            ):
+                 ):
         self.candidateInfo_list = copy.copy(getCandidateInfoList())
 
         if series_uid:
@@ -186,10 +265,24 @@ class LunaDataset(Dataset):
         ))
 
     def __len__(self):
-        return len(self.candidateInfo_list)
+        if self.ratio_int:
+            return 200000
+        else:
+            return len(self.candidateInfo_list)
 
     def __getitem__(self, ndx):
-        candidateInfo_tup = self.candidateInfo_list[ndx]
+        if self.ratio_int:
+            pos_ndx = ndx // (self.ratio_int + 1)
+            if ndx % (self.ratio_int + 1):
+                neg_ndx = ndx - 1 - pos_ndx
+                neg_ndx %= len(self.negative_list)
+                candidateInfo_tup = self.negative_list[neg_ndx]
+            else:
+                pos_ndx %= len(self.pos_list)
+                candidateInfo_tup = self.pos_list[pos_ndx]
+        else:
+            candidateInfo_tup = self.candidateInfo_list[ndx]
+
         width_irc = (32, 48, 48)
 
         candidate_a, center_irc = getCtRawCandidate(
@@ -201,10 +294,15 @@ class LunaDataset(Dataset):
         candidate_t = candidate_t.unsqueeze(0)
 
         pos_t = torch.tensor([
-                not candidateInfo_tup.isNodule_bool,
-                candidateInfo_tup.isNodule_bool
-            ],
+            not candidateInfo_tup.isNodule_bool,
+            candidateInfo_tup.isNodule_bool
+        ],
             dtype=torch.long,
         )
 
         return candidate_t, pos_t, candidateInfo_tup.series_uid, torch.tensor(center_irc)
+
+    def shuffleSamples(self):
+        if self.ratio_int:
+            random.shuffle(self.negative_list)
+            random.shuffle(self.pos_list)
