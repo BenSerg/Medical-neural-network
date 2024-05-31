@@ -2,6 +2,7 @@
 
 cache
 .gitignore
+dockerfile
 README.md
 Medical_neural_network\__pycache__
 Medical_neural_network\.ipynb_checkpoints
