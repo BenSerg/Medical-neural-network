@@ -5,6 +5,5 @@ numpy
 Pillow
 scipy
 SimpleITK
-torch
 scikit-image
 ipyvolume
